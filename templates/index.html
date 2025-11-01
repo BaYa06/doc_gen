@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ru">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DOCX-конструктор (Python, без JS)</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <body>
+    <main class="wrap">
+      <h1>DOCX-конструктор</h1>
+      <section class="template-bar">
+        <label>Шаблон формы:
+          <select id="tplSelect" title="Выбери сохранённый шаблон"></select>
+        </label>
+
+        <input id="tplName" placeholder="Имя нового шаблона" />
+
+        <button type="button" id="tplSave"  class="btn-secondary">Сохранить шаблон</button>
+        <button type="button" id="tplApply" class="btn-secondary">Применить</button>
+        <button type="button" id="tplDelete" class="btn-secondary">Удалить</button>
+      </section>
+
+      <form action="/docx" method="POST">
+        <fieldset id="block-common" data-keepclear><legend>Общее</legend>
+          <div class="grid-2">
+            <label>№ договора
+              <input class="input-get" name="contractNumber" value="{{ seqContract }}" required>
+            </label>
+            <label>Дата
+              <input class="input-get" name="date" type="date" value="{{ today }}" required>
+            </label>
+          </div>
+
+          <!-- выбор шаблона -->
+          <div class="grid-2">
+            <label>Шаблон
+              <select name="template">
+                <option value="template.docx">Шаблон 1</option>
+                <option value="template2.docx">Шаблон 2</option>
+              </select>
+            </label>
+            <div></div>
+          </div>
+
+          <div class="grid-2">
+            <label>Таксопарк <input class="input-get" name="taxiPark" value="КОЖЗАВОД" required></label>
+            <label>Директор <input class="input-get" name="director" value="Ашуров Замирбек Исроилович" required></label>
+          </div>
+          <div class="grid-2">
+            <label>Лицензия <input class="input-get" name="licenseNumber" value="ЮПП А-161 от 7 октября 2025 года" required></label>
+          </div>
+        </fieldset>
+
+        <fieldset><legend>Водитель</legend>
+          <div class="grid-2">
+            <label>Ф.И.О. водителя <input class="input-get" name="driverName" required></label>
+            <label>Паспорт № <input class="input-get" name="passportNumber" required></label>
+            <label>Адрес водителя <input class="input-get" name="driverAddress" required></label>
+          </div>
+        </fieldset>
+
+        <fieldset><legend>Автомобиль</legend>
+          <div class="grid-2">
+            <label>Марка авто <input class="input-get" name="carMake" required></label>
+            <label>Год выпуска <input class="input-get" name="carYear" type="number" min="1950" max="2100" required></label>
+          </div>
+          <div class="grid-2">
+            <label>Гос. номер <input class="input-get" name="carPlate" required></label>
+            <label>Цвет авто <input class="input-get" name="carColor" required></label>
+          </div>
+
+          <label>Право владения</label>
+          <label class="radio"><input type="radio" id="ownershipOwn" name="ownership" value="own" checked> Собственность водителя</label>
+          <label class="radio"><input type="radio" id="ownershipLease" name="ownership" value="lease"> Аренда / лизинг</label>
+
+          <div class="grid-2 lessor-row hidden" id="lessorRow">
+            <label>Арендодатель (если аренда) <input class="input-get" name="lessorName" id="lessorName"></label>
+            <div></div>
+          </div>
+
+          <div class="grid-2">
+            <label>Св-во о регистрации ТС № <input class="input-get" name="regCertNumber" required></label>
+            <label>ОСАГО № <input class="input-get" name="osagoNumber" required></label>
+          </div>
+          <div>
+            <label>Страхование пассажиров № <input class="input-get" name="paxInsNumber" required></label>
+          </div>
+        </fieldset>
+
+        <fieldset><legend>Подписи</legend>
+          <div class="grid-2">
+            <label data-keepclear>Заказчик (ФИО) <input class="input-get" name="customerFIO" value="Ашуров Замирбек Исроилович" required></label>
+            <label>Исполнитель (ФИО) <input class="input-get" name="executorFIO" required></label>
+          </div>
+        </fieldset>
+
+        <div class="actions">
+          <button type="button" id="clearForm">Очистить</button>
+          <button type="submit">Скачать DOCX</button>
+        </div>
+      </form>
+    </main>
+    <script>
+      (function(){
+        // --- Показ/скрытие "Арендодатель" ---
+        function toggleLessor(){
+          var own   = document.getElementById('ownershipOwn');
+          var lease = document.getElementById('ownershipLease');
+          var row   = document.getElementById('lessorRow');
+          if(!own || !lease || !row) return;
+          var useLease = lease.checked;
+          row.classList.toggle('hidden', !useLease);
+          var lessor = document.getElementById('lessorName');
+          if(lessor && !useLease){ lessor.value = ''; }
+        }
+        document.addEventListener('change', function(e){
+          if(e.target && (e.target.id === 'ownershipOwn' || e.target.id === 'ownershipLease')){
+            toggleLessor();
+          }
+        });
+        toggleLessor();
+
+        // --- Шаблоны (LocalStorage) + Очистить + Постоянный активный шаблон ---
+        const FORM       = document.querySelector('form[action*="docx"]') || document.querySelector('form');
+        const KEY        = 'docxTemplates';
+        const ACTIVE_KEY = 'docxActiveTemplate';
+
+        function getAllInputs(){
+          if(!FORM) return [];
+          return FORM.querySelectorAll('input, select, textarea');
+        }
+
+        function serializeForm(){
+          const data = {};
+          getAllInputs().forEach(el => {
+            if(!el.name) return;
+            if (el.type === 'radio') {
+              if (el.checked) data[el.name] = el.value;
+            } else if (el.type === 'checkbox') {
+              data[el.name] = el.checked ? 'on' : '';
+            } else {
+              data[el.name] = (el.value ?? '').toString();
+            }
+          });
+          return data;
+        }
+
+        // При применении шаблона по умолчанию не перезаписываем номер и дату
+        function fillForm(data, opts){
+          const ignore = (opts && opts.ignore) || ['contractNumber','date'];
+          Object.entries(data || {}).forEach(([name, val]) => {
+            if(ignore.includes(name)) return;
+            const els = FORM.querySelectorAll(`[name="${CSS.escape(name)}"]`);
+            els.forEach(el => {
+              if (el.type === 'radio') {
+                el.checked = (el.value === val);
+              } else if (el.type === 'checkbox') {
+                el.checked = !!val && val !== 'off';
+              } else {
+                el.value = val;
+              }
+            });
+          });
+          toggleLessor();
+        }
+
+        // Очистить ВСЁ, КРОМЕ [data-keepclear]
+        function clearForm(){
+          getAllInputs().forEach(el => {
+            if (el.closest('[data-keepclear]')) return; // не трогаем "Общее" и Заказчик(ФИО)
+
+            if (el.type === 'radio' || el.type === 'checkbox') {
+              // дефолт: "Собственность водителя"
+              if (el.id === 'ownershipOwn') el.checked = true;
+              else el.checked = false;
+            } else {
+              el.value = '';
+            }
+          });
+          toggleLessor();
+        }
+
+        function getStore(){ return JSON.parse(localStorage.getItem(KEY) || '{}'); }
+        function setStore(store){ localStorage.setItem(KEY, JSON.stringify(store)); }
+
+        function loadTemplates(){
+          const sel   = document.getElementById('tplSelect');
+          const store = getStore();
+          if (!sel) return;
+          const options = Object.keys(store)
+            .sort((a,b) => a.localeCompare(b, 'ru'))
+            .map(n => `<option value="${n}">${n}</option>`)
+            .join('');
+          sel.innerHTML = `<option value="">(выбери)</option>` + options;
+
+          const active = localStorage.getItem(ACTIVE_KEY);
+          if (active && store[active]) sel.value = active;
+        }
+
+        // Элементы панели
+        const btnSave   = document.getElementById('tplSave');
+        const btnApply  = document.getElementById('tplApply');
+        const btnDelete = document.getElementById('tplDelete');
+        const inpName   = document.getElementById('tplName');
+        const selTpl    = document.getElementById('tplSelect');
+        const btnClear  = document.getElementById('clearForm');
+
+        function applySelectedTemplate(){
+          if (!selTpl || !selTpl.value) { alert('Выберите шаблон'); return; }
+          const store = getStore();
+          const data  = store[selTpl.value];
+          if (!data) { alert('Шаблон не найден'); return; }
+          fillForm(data);
+          localStorage.setItem(ACTIVE_KEY, selTpl.value); // постоянный режим
+        }
+
+        if (btnSave) btnSave.addEventListener('click', function(){
+          const name = (inpName && inpName.value.trim()) || (selTpl && selTpl.value.trim());
+          if (!name) { alert('Укажите имя шаблона'); return; }
+          const store = getStore();
+          store[name] = serializeForm();
+          setStore(store);
+          loadTemplates();
+          if (selTpl) selTpl.value = name;
+          localStorage.setItem(ACTIVE_KEY, name);
+          fillForm(store[name]);
+          alert('Шаблон сохранён: ' + name);
+        });
+
+        if (btnApply) btnApply.addEventListener('click', applySelectedTemplate);
+
+        if (selTpl) selTpl.addEventListener('change', function(){
+          if (!selTpl.value) {
+            localStorage.removeItem(ACTIVE_KEY);
+            return;
+          }
+          applySelectedTemplate();
+        });
+
+        if (btnDelete) btnDelete.addEventListener('click', function(){
+          if (!selTpl || !selTpl.value) return;
+          if (!confirm('Удалить шаблон "' + selTpl.value + '"?')) return;
+          const store = getStore();
+          const del   = selTpl.value;
+          delete store[del];
+          setStore(store);
+          const active = localStorage.getItem(ACTIVE_KEY);
+          if (active === del) localStorage.removeItem(ACTIVE_KEY);
+          loadTemplates();
+          if (inpName) inpName.value = '';
+        });
+
+        if (btnClear) btnClear.addEventListener('click', clearForm);
+
+        // init
+        loadTemplates();
+
+        // авто-апплай активного шаблона при загрузке
+        (function(){
+          const active = localStorage.getItem(ACTIVE_KEY);
+          if (!active) return;
+          const store = getStore();
+          if (store && store[active]) fillForm(store[active]);
+        })();
+      })();
+    </script>
+    <script>
+      document.addEventListener('DOMContentLoaded', async () => {
+        // 1) Авто-дата «сегодня»
+        const dateInput = document.querySelector('input[name="date"]');
+        if (dateInput && !dateInput.value) {
+          const today = new Date();
+          dateInput.value = today.toISOString().split('T')[0]; // YYYY-MM-DD
+        }
+
+        // 2) Подтянуть текущий номер договора с сервера
+        const numInput = document.querySelector('input[name="contractNumber"]');
+        if (numInput && (!numInput.value || numInput.value.trim() === '')) {
+          // Путь для serverless-функции: сначала пробуем /api/docx/seq, иначе /seq (на случай монолита)
+          const candidates = ['/api/docx/seq', '/seq'];
+          for (const url of candidates) {
+            try {
+              const res = await fetch(url, {credentials: 'same-origin'});
+              if (res.ok) {
+                const data = await res.json();
+                if (data && data.contractNumber != null) {
+                  numInput.value = data.contractNumber;
+                  break;
+                }
+              }
+            } catch (e) { /* тихо падаем и пробуем следующий */ }
+          }
+        }
+      });
+      </script>
+
+      <script>
+        (function(){
+          const KEY = 'contractSeq';
+          const form = document.querySelector('form[action="/docx"]');
+          const numInput = document.querySelector('input[name="contractNumber"]');
+
+          // На всякий случай проставим дату «сегодня»
+          const dateInput = document.querySelector('input[name="date"]');
+          if (dateInput && !dateInput.value) dateInput.valueAsDate = new Date();
+
+          // Автоподстановка номера из localStorage (если нет с сервера)
+          if (numInput && (!numInput.value || !numInput.value.trim())) {
+            const n = parseInt(localStorage.getItem(KEY) || '1', 10);
+            numInput.value = n;
+          }
+
+          // Перед отправкой — зафиксировать номер и увеличить счётчик
+          if (form) {
+            form.addEventListener('submit', function(){
+              const cur = parseInt(localStorage.getItem(KEY) || '1', 10);
+              if (numInput && (!numInput.value || !numInput.value.trim())) {
+                numInput.value = cur;
+              }
+              localStorage.setItem(KEY, String(cur + 1));
+            });
+          }
+        })();
+      </script>
+
+  </body>
+</html>

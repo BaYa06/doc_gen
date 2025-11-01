@@ -1,0 +1,6 @@
+Flask
+docxtpl
+python-docx
+Jinja2
+Pillow
+gunicorn
