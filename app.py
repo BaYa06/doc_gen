@@ -145,6 +145,8 @@ def gen_docx():
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
+
+
 # alias for serverless-style path
 @app.post("/api/docx")
 def gen_docx_alias():
