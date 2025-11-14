@@ -105,14 +105,50 @@ def gen_docx():
     ctx["contractNumber"] = used_num
 
     # ownership radios -> checkboxes in template
-    ownership = request.form.get("ownership", "own")
+    # --- ownership radios -> checkboxes in template ---
+    ownership = request.form.get("ownership", "own").strip()
+
+    # Белый список на всякий случай
+    allowed_ownership = {"own", "own2", "lease"}
+    if ownership not in allowed_ownership:
+        ownership = "own"
+
+    # Сначала всё снимаем
+    ctx["ownershipOwn"]   = "☐"
+    ctx["ownershipOwn2"]  = "☐"
+    ctx["ownershipLease"] = "☐"
+
+    # По умолчанию — очистка связанных полей
+    ctx["lessorName"]    = ""
+    ctx["attorneyName"]  = ""
+    ctx["poaNumber"]     = ""
+
+    # Отмечаем выбранный и заполняем зависящие поля
     if ownership == "own":
         ctx["ownershipOwn"] = "☑"
-        ctx["ownershipLease"] = "☐"
-        ctx["lessorName"] = ""
-    else:
-        ctx["ownershipOwn"] = "☐"
+
+    elif ownership == "own2":
+        ctx["ownershipOwn2"] = "☑"
+        # Если добавите поля в форму — подхватим:
+        ctx["attorneyName"] = request.form.get("attorneyName", "").strip()
+        ctx["poaNumber"]    = request.form.get("poaNumber", "").strip()
+
+    elif ownership == "lease":
         ctx["ownershipLease"] = "☑"
+        ctx["lessorName"]     = request.form.get("lessorName", "").strip()
+
+    # (необязательно) простая валидация
+    errors = []
+    if ownership == "lease" and not ctx["lessorName"]:
+        errors.append("Укажите название/ФИО арендодателя (lessorName).")
+    # если будет логика для доверенности:
+    # if ownership == "own2" and not ctx["attorneyName"]:
+    #     errors.append("Укажите ФИО доверенного лица (attorneyName).")
+
+    if errors:
+        # верните шаблон формы с сообщением об ошибках
+        return render_template("index.html", errors=errors, **ctx), 400
+
 
     # choose template from whitelist
     allowed = {"template.docx", "template2.docx"}
@@ -144,8 +180,6 @@ def gen_docx():
         download_name=fname,
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
-
-
 
 # alias for serverless-style path
 @app.post("/api/docx")
